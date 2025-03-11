@@ -1,0 +1,7 @@
+(executable
+ (name math)
+ (libraries qbecaml))
+
+(executable
+ (name hello_world)
+ (libraries qbecaml))
