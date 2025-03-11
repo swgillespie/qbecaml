@@ -23,6 +23,13 @@ and data = {
   mutable data_items : Il.data_item list;
 }
 
+and struct_ty = {
+  struct_builder : t;
+  struct_name : string;
+  mutable struct_alignment : int option;
+  mutable struct_fields : (Il.ty * int option) list;
+}
+
 let new_builder () = { builder_items = [] }
 let finish builder = List.rev builder.builder_items
 
@@ -134,6 +141,33 @@ let make_return ?value:value_opt block =
     failwith "block already has a terminator";
   block.block_terminator <- Some (Il.JumpReturn value_opt);
   ()
+
+let new_struct builder name =
+  {
+    struct_builder = builder;
+    struct_name = name;
+    struct_alignment = None;
+    struct_fields = [];
+  }
+
+let set_struct_alignment builder align =
+  builder.struct_alignment <- Some align;
+  ()
+
+let add_struct_field ?count:count_opt builder ty =
+  builder.struct_fields <- (ty, count_opt) :: builder.struct_fields;
+  ()
+
+let finish_struct builder =
+  let struct_ty =
+    Il.TypedefStruct
+      ( builder.struct_name,
+        builder.struct_alignment,
+        List.rev builder.struct_fields )
+  in
+  builder.struct_builder.builder_items <-
+    Il.ItemTypedef struct_ty :: builder.struct_builder.builder_items;
+  Il.TypeAggregate builder.struct_name
 
 let%expect_test "return_zero" =
   let builder = new_builder () in

@@ -29,6 +29,7 @@ type ty =
   | TypeUnsignedByte
   | TypeSignedHalfword
   | TypeUnsignedHalfword
+  | TypeAggregate of string
 
 type instruction_call = {
   instruction_call_retval : (string * ty) option;
@@ -54,7 +55,12 @@ type func = {
   function_parameters : (string * ty) list;
 }
 
-type item = ItemData of data | ItemFunc of func
+type typedef =
+  | TypedefStruct of string * int option * (ty * int option) list
+  | TypedefUnion of string * int option * (ty * int option) list list
+  | TypedefOpaque of string * int * int
+
+type item = ItemData of data | ItemFunc of func | ItemTypedef of typedef
 type program = item list
 
 let string_of_value = function
@@ -73,6 +79,37 @@ let string_of_ty = function
   | TypeUnsignedByte -> "ub"
   | TypeSignedHalfword -> "sh"
   | TypeUnsignedHalfword -> "uh"
+  | TypeAggregate s -> ":" ^ s
+
+let string_of_typedef typedef =
+  let string_of_member = function
+    | ty, None -> string_of_ty ty
+    | ty, Some align -> Printf.sprintf "%s %d" (string_of_ty ty) align
+  in
+  match typedef with
+  | TypedefStruct (name, align, fields) ->
+      let align_str =
+        match align with Some a -> Printf.sprintf " align %d" a | None -> ""
+      in
+      let member_str = String.concat ", " (List.map string_of_member fields) in
+      Printf.sprintf "type :%s =%s { %s }" name align_str member_str
+  | TypedefUnion (name, align, variants) ->
+      let align_str =
+        match align with Some a -> Printf.sprintf " align %d" a | None -> ""
+      in
+      let variant_str =
+        String.concat " "
+          (List.map
+             (fun fields ->
+               "{ "
+               ^ String.concat ", "
+                   (List.map (fun field -> string_of_member field) fields)
+               ^ " }")
+             variants)
+      in
+      Printf.sprintf "type :%s =%s { %s }" name align_str variant_str
+  | TypedefOpaque (name, size, align) ->
+      Printf.sprintf "type :%s = align %d { %d }" name align size
 
 let string_of_instruction = function
   | InstructionCall
@@ -166,6 +203,7 @@ let string_of_data data =
 let string_of_item = function
   | ItemData data -> string_of_data data
   | ItemFunc func -> string_of_function func
+  | ItemTypedef typedef -> string_of_typedef typedef
 
 let string_of_program program =
   String.concat "\n\n" (List.map string_of_item program)
@@ -222,4 +260,33 @@ let%expect_test "hello_world_func" =
       %r =w call $puts(l $str)
       ret 0
     }
+    |}]
+
+let%expect_test "typedefs" =
+  let typedefs =
+    [
+      TypedefStruct ("foo", None, [ (TypeWord, None); (TypeLong, Some 8) ]);
+      TypedefStruct
+        ("aligned_foo", Some 8, [ (TypeWord, None); (TypeLong, None) ]);
+      TypedefUnion
+        ("bar", None, [ [ (TypeWord, None) ]; [ (TypeLong, Some 8) ] ]);
+      TypedefUnion
+        ("aligned_bar", Some 8, [ [ (TypeWord, None) ]; [ (TypeLong, None) ] ]);
+      TypedefUnion
+        ( "aligned_bar_member_count",
+          None,
+          [ [ (TypeWord, None) ]; [ (TypeDouble, Some 8) ] ] );
+      TypedefOpaque ("baz", 16, 8);
+    ]
+  in
+  let typedef_strs = List.map string_of_typedef typedefs in
+  List.iter print_endline typedef_strs;
+  [%expect
+    {|
+    type :foo = { w, l 8 }
+    type :aligned_foo = align 8 { w, l }
+    type :bar = { { w } { l 8 } }
+    type :aligned_bar = align 8 { { w } { l } }
+    type :aligned_bar_member_count = { { w } { d 8 } }
+    type :baz = align 8 { 16 }
     |}]
